@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<html>
+  <head>
+    <title>Lines and Dashes (Three.js)</title>
+  	<meta charset="utf-8">
+  	<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <style>
+      body {
+        margin: 0px;
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+
+    <script src="./three.min.js"></script>
+    <script src="./OrbitControls.js"></script>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
+
+    <div id="container" style="position: absolute; left: 0px; top: 0px;"></div>
+
+    <script type="x-shader/x-vertex" id="vertexshader">
+			attribute float size;
+			attribute vec3 customColor;
+			varying vec3 vColor;
+			void main() {
+				vColor = customColor;
+				vec4 mvPosition = modelViewMatrix * vec4( position, 1.0 );
+				gl_PointSize = size * ( 300.0 / -mvPosition.z );
+				gl_Position = projectionMatrix * mvPosition;
+			}
+		</script>
+
+    <script type="x-shader/x-fragment" id="fragmentshader">
+			uniform vec3 color;
+			uniform sampler2D texture;
+			varying vec3 vColor;
+			void main() {
+				gl_FragColor = vec4( color * vColor, 1.0 );
+				gl_FragColor = gl_FragColor * texture2D( texture, gl_PointCoord );
+				if ( gl_FragColor.a < ALPHATEST ) discard;
+			}
+		</script>
+
+    <script>
+
+    let container, scene, camera, renderer, controls, stats;
+
+    init();
+    animate();
+
+    function init() {
+
+      // SCENE
+      scene = new THREE.Scene();
+      // CAMERA
+      var SCREEN_WIDTH = window.innerWidth, SCREEN_HEIGHT = window.innerHeight;
+      var VIEW_ANGLE = 45, ASPECT = SCREEN_WIDTH / SCREEN_HEIGHT, NEAR = 0.1, FAR = 20000;
+      camera = new THREE.PerspectiveCamera( VIEW_ANGLE, ASPECT, NEAR, FAR);
+      scene.add(camera);
+      camera.position.set(0,0,2);
+      camera.lookAt(scene.position);
+      // RENDERER
+      renderer = new THREE.WebGLRenderer( {antialias: true} );
+      renderer.setSize(SCREEN_WIDTH, SCREEN_HEIGHT);
+    	container = document.getElementById( 'container' );
+    	container.appendChild( renderer.domElement );
+      // CONTROLS
+      controls = new THREE.OrbitControls( camera, renderer.domElement );
+
+      // LINES
+      $.getJSON("./circuit-lines.json", function(json) {
+        let vertices = json[1][1][0][1][7][5];
+        let lines = json[3][0][1];
+
+        for (idx in lines) {
+          let lineGeometry = new THREE.Geometry();
+          let vertArray = lineGeometry.vertices;
+          let points = lines[idx][0];
+
+          for (pnt in points) {
+            let pos = vertices[points[pnt]];
+            vertArray.push( new THREE.Vector3( pos[0], pos[1], pos[2] ))
+          }
+
+          var lineMaterial = new THREE.LineBasicMaterial( { color: 0xffffff } );
+          var line = new THREE.Line( lineGeometry, lineMaterial );
+          scene.add(line);
+        };
+      });
+
+      // POINTS
+      $.getJSON("./circuit-points.json", function(json) {
+        let PARTICLE_SIZE = 0.25;
+        let vertices = json[1][1][0][1][7][5];
+
+        let positions = new Float32Array( vertices.length * 3 );
+        let colors = new Float32Array( vertices.length * 3 );
+        let sizes = new Float32Array( vertices.length );
+
+        let vertex;
+        let color = new THREE.Color();
+
+        for ( var i = 0, l = vertices.length; i < l; i++ ) {
+          vertex = new THREE.Vector3( vertices[i][0], vertices[i][1], vertices[i][2] );
+          vertex.toArray( positions, i * 3 );
+          color.setHSL( 0.01 + 0.1 * ( i / l ), 1.0, 0.5 );
+          color.toArray( colors, i * 3 );
+          sizes[ i ] = PARTICLE_SIZE * 0.5;
+        };
+
+        let geometry = new THREE.BufferGeometry();
+        geometry.addAttribute( 'position', new THREE.BufferAttribute( positions, 3) );
+        geometry.addAttribute( 'customColor', new THREE.BufferAttribute( colors, 3) );
+        geometry.addAttribute( 'size', new THREE.BufferAttribute( sizes, 1) );
+
+        let material = new THREE.ShaderMaterial({
+          uniforms: {
+            color: { value: new THREE.Color( 0xffffff ) },
+            texture: { value: new THREE.TextureLoader().load( "./img/disc.png" )}
+          },
+          vertexShader: document.getElementById( 'vertexshader' ).textContent,
+          fragmentShader: document.getElementById( 'fragmentshader' ).textContent,
+          alphaTest: 0.9
+        })
+
+        particles = new THREE.Points( geometry, material );
+        scene.add( particles );
+
+      });
+
+    };
+
+    window.addEventListener( 'resize', onWindowResize, false );
+
+    function onWindowResize(){
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize( window.innerWidth, window.innerHeight );
+    };
+
+    function animate() {
+      requestAnimationFrame( animate );
+    	render();
+      update();
+    };
+
+    function update() {
+    	controls.update();
+    };
+
+    function render() {
+    	renderer.render( scene, camera );
+    };
+
+    </script>
+
+  </body>
+</html>

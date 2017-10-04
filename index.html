@@ -2,43 +2,56 @@
 <html lang="en">
 <html>
   <head>
-    <title>Lines and Dashes (Three.js)</title>
+    <title>Circuit Board</title>
   	<meta charset="utf-8">
   	<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
-    <style>
-      body {
-        margin: 0px;
-        overflow: hidden;
-      }
-    </style>
+
+    <script src="./lib/three.min.js"></script>
+    <script src="./lib/OrbitControls.js"></script>
+    <script src="./lib/Stats.js"></script>
+    <script src="./lib/jquery.min.js"></script>
+    <link rel="stylesheet" type="text/css" href="./style.css">
   </head>
   <body>
 
-    <script src="./three.min.js"></script>
-    <script src="./OrbitControls.js"></script>
-    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
+    <div id="page">
+      <div id="container"></div>
+    </div>
 
-    <div id="container" style="position: absolute; left: 0px; top: 0px;"></div>
+    <div id="overlay"></div>
 
     <script type="x-shader/x-vertex" id="vertexshader">
 			attribute float size;
-			attribute vec3 customColor;
-			varying vec3 vColor;
+			attribute float idx;
+      varying float id;
+      uniform vec2 resolution;
 			void main() {
-				vColor = customColor;
+        id = idx;
 				vec4 mvPosition = modelViewMatrix * vec4( position, 1.0 );
-				gl_PointSize = size * ( 300.0 / -mvPosition.z );
+				gl_PointSize = size * ( 300.0 / -mvPosition.z ) * resolution.y;
 				gl_Position = projectionMatrix * mvPosition;
 			}
 		</script>
 
     <script type="x-shader/x-fragment" id="fragmentshader">
-			uniform vec3 color;
-			uniform sampler2D texture;
-			varying vec3 vColor;
+      uniform float time;
+      uniform vec3 color;
+      uniform sampler2D texture;
+      uniform sampler2D textureBlur;
+      varying float id;
+
+      float rand(float n){return fract(sin(n) * 43758.5453123);}
+
 			void main() {
-				gl_FragColor = vec4( color * vColor, 1.0 );
-				gl_FragColor = gl_FragColor * texture2D( texture, gl_PointCoord );
+        float random = rand(id);
+				gl_FragColor = vec4( color, 1.0 );
+        vec4 disc = gl_FragColor * texture2D( texture, gl_PointCoord );
+
+        float tOffset = random > 0.5 ? 10.0 : 0.0;
+        float flash = sin(time * 25.0 + tOffset);
+        vec4 disc_blur = gl_FragColor * texture2D( textureBlur, gl_PointCoord ) * flash;
+        gl_FragColor = max(disc, disc_blur);
+        gl_FragColor.a *= 0.5;
 				if ( gl_FragColor.a < ALPHATEST ) discard;
 			}
 		</script>
@@ -46,9 +59,20 @@
     <script>
 
     let container, scene, camera, renderer, controls, stats;
+    let start = Date.now();
+    let pMaterial;
+
+    let props = {
+      orbit: false,
+      dev: true
+    }
 
     init();
     animate();
+
+    $(document).ready(function() {
+      $('#overlay').css('opacity', 0.0);
+    });
 
     function init() {
 
@@ -56,21 +80,32 @@
       scene = new THREE.Scene();
       // CAMERA
       var SCREEN_WIDTH = window.innerWidth, SCREEN_HEIGHT = window.innerHeight;
-      var VIEW_ANGLE = 45, ASPECT = SCREEN_WIDTH / SCREEN_HEIGHT, NEAR = 0.1, FAR = 20000;
+      var VIEW_ANGLE = 45, ASPECT = SCREEN_WIDTH / SCREEN_HEIGHT, NEAR = 0.1, FAR = 100;
       camera = new THREE.PerspectiveCamera( VIEW_ANGLE, ASPECT, NEAR, FAR);
       scene.add(camera);
-      camera.position.set(0,0,2);
+      camera.position.set( 0, 0, window.innerHeight / 540 );
       camera.lookAt(scene.position);
       // RENDERER
-      renderer = new THREE.WebGLRenderer( {antialias: true} );
+      renderer = new THREE.WebGLRenderer( { antialias: true, alpha: true } );
       renderer.setSize(SCREEN_WIDTH, SCREEN_HEIGHT);
+      renderer.setClearColor( 0x000000, 0);
     	container = document.getElementById( 'container' );
     	container.appendChild( renderer.domElement );
       // CONTROLS
-      controls = new THREE.OrbitControls( camera, renderer.domElement );
+      if (props.orbit) {
+        controls = new THREE.OrbitControls( camera, renderer.domElement );
+      };
+      // STATS
+      if (props.dev) {
+      	stats = new Stats();
+      	stats.domElement.style.position = 'absolute';
+      	stats.domElement.style.bottom = '0px';
+      	stats.domElement.style.zIndex = 100;
+      	container.appendChild( stats.domElement );
+      };
 
       // LINES
-      $.getJSON("./circuit-lines.json", function(json) {
+      $.getJSON("./geo/circuit-lines.json", function(json) {
         let vertices = json[1][1][0][1][7][5];
         let lines = json[3][0][1];
 
@@ -81,22 +116,26 @@
 
           for (pnt in points) {
             let pos = vertices[points[pnt]];
-            vertArray.push( new THREE.Vector3( pos[0], pos[1], pos[2] ))
+            vertArray.push( new THREE.Vector3( pos[0], pos[1], pos[2] - 0.01 ))
           }
 
-          var lineMaterial = new THREE.LineBasicMaterial( { color: 0xffffff } );
+          var lineMaterial = new THREE.LineBasicMaterial( {
+            color: 0x0095bf,
+            transparent: true,
+            opacity: 0.25
+          } );
           var line = new THREE.Line( lineGeometry, lineMaterial );
           scene.add(line);
         };
       });
 
       // POINTS
-      $.getJSON("./circuit-points.json", function(json) {
-        let PARTICLE_SIZE = 0.25;
+      $.getJSON("./geo/circuit-points.json", function(json) {
+        let PARTICLE_SIZE = 0.000125;
         let vertices = json[1][1][0][1][7][5];
 
         let positions = new Float32Array( vertices.length * 3 );
-        let colors = new Float32Array( vertices.length * 3 );
+        let idxs = new Float32Array( vertices.length * 3 );
         let sizes = new Float32Array( vertices.length );
 
         let vertex;
@@ -105,27 +144,31 @@
         for ( var i = 0, l = vertices.length; i < l; i++ ) {
           vertex = new THREE.Vector3( vertices[i][0], vertices[i][1], vertices[i][2] );
           vertex.toArray( positions, i * 3 );
-          color.setHSL( 0.01 + 0.1 * ( i / l ), 1.0, 0.5 );
-          color.toArray( colors, i * 3 );
-          sizes[ i ] = PARTICLE_SIZE * 0.5;
+
+          idxs[ i ] = i;
+          sizes[ i ] = PARTICLE_SIZE;
         };
 
         let geometry = new THREE.BufferGeometry();
         geometry.addAttribute( 'position', new THREE.BufferAttribute( positions, 3) );
-        geometry.addAttribute( 'customColor', new THREE.BufferAttribute( colors, 3) );
+        geometry.addAttribute( 'idx', new THREE.BufferAttribute( idxs, 1) );
         geometry.addAttribute( 'size', new THREE.BufferAttribute( sizes, 1) );
 
-        let material = new THREE.ShaderMaterial({
+        pMaterial = new THREE.ShaderMaterial({
           uniforms: {
-            color: { value: new THREE.Color( 0xffffff ) },
-            texture: { value: new THREE.TextureLoader().load( "./img/disc.png" )}
+            time: { value: 0.0 },
+            resolution: { value: new THREE.Vector2( window.innerWidth, window.innerHeight ) },
+            color: { value: new THREE.Color( 0x0095bf ) },
+            texture: { value: new THREE.TextureLoader().load( "./img/disc.png" )},
+            textureBlur: { value: new THREE.TextureLoader().load( "./img/disc_blur.png" )}
           },
           vertexShader: document.getElementById( 'vertexshader' ).textContent,
           fragmentShader: document.getElementById( 'fragmentshader' ).textContent,
-          alphaTest: 0.9
+          alphaTest: 0.025,
+          transparent: true
         })
 
-        particles = new THREE.Points( geometry, material );
+        particles = new THREE.Points( geometry, pMaterial );
         scene.add( particles );
 
       });
@@ -135,9 +178,11 @@
     window.addEventListener( 'resize', onWindowResize, false );
 
     function onWindowResize(){
+      camera.position.set( 0, 0, window.innerHeight / 540 );
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize( window.innerWidth, window.innerHeight );
+      pMaterial.uniforms.resolution.value = new THREE.Vector2( window.innerWidth, window.innerHeight );
     };
 
     function animate() {
@@ -147,11 +192,21 @@
     };
 
     function update() {
-    	controls.update();
+      if (props.orbit) {
+    	   controls.update();
+      };
+
+      if (props.dev) {
+        stats.update();
+      };
     };
 
     function render() {
     	renderer.render( scene, camera );
+
+      if (pMaterial) {
+        pMaterial.uniforms[ 'time' ].value = .00025 * ( Date.now() - start );
+      }
     };
 
     </script>
